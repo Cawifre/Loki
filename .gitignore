@@ -16,6 +16,9 @@
 # Mono auto generated files
 mono_crash.*
 
+# Tiled Map Editor transient files
+*.tiled-session
+
 # Build results
 [Dd]ebug/
 [Dd]ebugPublic/
