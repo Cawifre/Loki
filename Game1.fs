@@ -58,7 +58,7 @@ module TileLayer =
         match layer.Tiles |> Array.tryItem layerIndex with
         | Some tileId when tileId > 0 ->
             let tileIndex = tileId - 1 // Since `0` is the empty tile, all other ids are 1-based
-            Some (tileId)
+            Some (tileIndex)
         | _ -> None
 
     let draw (spriteBatch: SpriteBatch, tileSet: TileSet, tileLayer: TileLayer) =
@@ -109,13 +109,13 @@ type Game1 () as this =
         let layerTiles = 
             [| 2;2;2;2;2;2;2;2;2;2;
                2;0;0;0;0;0;0;0;0;2;
-               2;0;0;0;0;0;0;0;0;2;
-               2;0;0;0;0;0;0;0;0;2;
-               2;0;0;0;0;0;0;0;0;2;
-               2;0;0;0;0;0;0;0;0;2;
-               2;0;0;0;0;0;0;0;0;2;
-               2;0;0;0;0;0;0;0;0;2;
-               2;0;0;0;0;0;0;0;0;2;
+               2;0;0;0;0;0;1;0;0;2;
+               2;0;0;0;0;1;2;0;0;2;
+               2;0;0;0;1;2;3;0;0;2;
+               2;0;0;1;2;3;4;0;0;2;
+               2;0;0;0;1;2;3;0;0;2;
+               2;0;0;0;0;1;2;0;0;2;
+               2;0;0;0;0;0;1;0;0;2;
                2;0;0;0;0;0;0;0;0;2;
                2;0;0;0;0;0;0;0;0;2;
                2;0;0;0;0;0;0;0;0;2;
@@ -135,7 +135,7 @@ type Game1 () as this =
 
         ballTexture <- this.Content.Load "ball"
 
-        ball <- { Position = Vector2.Zero
+        ball <- { Position = Vector2(64.f, 64.f)
                   Speed = 500.f
                   Texture = ballTexture
                   Size = Point(64, 64)
