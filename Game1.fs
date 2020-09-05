@@ -85,8 +85,14 @@ type Game1 () as this =
         if state.IsKeyDown k then Some() else None
 
     let getMotion = function
+        | (KeyDown Keys.A | KeyDown Keys.Left) & (KeyDown Keys.W | KeyDown Keys.Up) -> Vector2(-1.f, -1.f)
+        | (KeyDown Keys.A | KeyDown Keys.Left) & (KeyDown Keys.S | KeyDown Keys.Down) -> Vector2(-1.f, 1.f)
+        | (KeyDown Keys.D | KeyDown Keys.Right) & (KeyDown Keys.W | KeyDown Keys.Up) -> Vector2(1.f, -1.f)
+        | (KeyDown Keys.D | KeyDown Keys.Right) & (KeyDown Keys.S | KeyDown Keys.Down) -> Vector2(1.f, 1.f)
         | KeyDown Keys.A | KeyDown Keys.Left -> Vector2(-1.f, 0.f)
         | KeyDown Keys.D | KeyDown Keys.Right -> Vector2(1.f, 0.f)
+        | KeyDown Keys.S | KeyDown Keys.Down -> Vector2(0.f, 1.f)
+        | KeyDown Keys.W | KeyDown Keys.Up -> Vector2(0.f, -1.f)
         | _ -> Vector2.Zero
     
     let getMovementVector (state: KeyboardState) =
@@ -148,7 +154,9 @@ type Game1 () as this =
         let movementVector = getMovementVector(Keyboard.GetState())
 
         let newPostion =
-            ball.Position + movementVector * ball.Speed * float32 gameTime.ElapsedGameTime.TotalSeconds
+            let maxX, maxY = float32 (tileLayer.CountX * tileSet.TileSizeX - ball.Size.X), float32 (tileLayer.CountY * tileSet.TileSizeY - ball.Size.Y)
+            let position = ball.Position + movementVector * ball.Speed * float32 gameTime.ElapsedGameTime.TotalSeconds
+            Vector2.Clamp(position, Vector2.Zero, Vector2(maxX, maxY))
 
         ball <- {ball with Position = newPostion}
 
