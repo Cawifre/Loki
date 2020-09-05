@@ -8,6 +8,7 @@ open System
 type Sprite = 
     {
         Position: Vector2;
+        MovementVector: Vector2;
         Speed: float32;
         Texture: Texture2D;
         Size: Point;
@@ -95,10 +96,14 @@ type Game1 () as this =
         | KeyDown Keys.W | KeyDown Keys.Up -> Vector2(0.f, -1.f)
         | _ -> Vector2.Zero
     
-    let getMovementVector (state: KeyboardState) =
+    let getMovementVector (initialVector, state: KeyboardState) =
         let motion = getMotion(state)
-        if motion <> Vector2.Zero then motion.Normalize()
-        motion
+        if motion <> Vector2.Zero
+        then
+            motion.Normalize()
+            motion
+        else
+            initialVector
 
     do
         this.Content.RootDirectory <- "Content"
@@ -143,6 +148,7 @@ type Game1 () as this =
 
         ball <- { Position = Vector2(64.f, 64.f)
                   Speed = 500.f
+                  MovementVector = Vector2(1.f, 0.f)
                   Texture = ballTexture
                   Size = Point(64, 64)
                   Offset = Point.Zero }
@@ -151,14 +157,14 @@ type Game1 () as this =
         if (GamePad.GetState(PlayerIndex.One).Buttons.Back = ButtonState.Pressed || Keyboard.GetState().IsKeyDown(Keys.Escape))
         then this.Exit();
 
-        let movementVector = getMovementVector(Keyboard.GetState())
+        let movementVector = getMovementVector(ball.MovementVector, Keyboard.GetState())
 
         let newPostion =
             let maxX, maxY = float32 (tileLayer.CountX * tileSet.TileSizeX - ball.Size.X), float32 (tileLayer.CountY * tileSet.TileSizeY - ball.Size.Y)
             let position = ball.Position + movementVector * ball.Speed * float32 gameTime.ElapsedGameTime.TotalSeconds
             Vector2.Clamp(position, Vector2.Zero, Vector2(maxX, maxY))
 
-        ball <- {ball with Position = newPostion}
+        ball <- {ball with Position = newPostion; MovementVector = movementVector}
 
         base.Update(gameTime)
  
