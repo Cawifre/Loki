@@ -85,23 +85,28 @@ type Game1 () as this =
     let (|KeyDown|_|) k (state: KeyboardState) =
         if state.IsKeyDown k then Some() else None
 
-    let getMotion = function
-        | (KeyDown Keys.A | KeyDown Keys.Left) & (KeyDown Keys.W | KeyDown Keys.Up) -> Vector2(-1.f, -1.f)
-        | (KeyDown Keys.A | KeyDown Keys.Left) & (KeyDown Keys.S | KeyDown Keys.Down) -> Vector2(-1.f, 1.f)
-        | (KeyDown Keys.D | KeyDown Keys.Right) & (KeyDown Keys.W | KeyDown Keys.Up) -> Vector2(1.f, -1.f)
-        | (KeyDown Keys.D | KeyDown Keys.Right) & (KeyDown Keys.S | KeyDown Keys.Down) -> Vector2(1.f, 1.f)
-        | KeyDown Keys.A | KeyDown Keys.Left -> Vector2(-1.f, 0.f)
-        | KeyDown Keys.D | KeyDown Keys.Right -> Vector2(1.f, 0.f)
-        | KeyDown Keys.S | KeyDown Keys.Down -> Vector2(0.f, 1.f)
-        | KeyDown Keys.W | KeyDown Keys.Up -> Vector2(0.f, -1.f)
-        | _ -> Vector2.Zero
+    let getDirection (state) =
+        let xDirection =
+            match state with
+                | KeyDown Keys.A | KeyDown Keys.Left -> -1.f
+                | KeyDown Keys.D | KeyDown Keys.Right -> 1.f
+                | _ -> 0.f
+        let yDirection =
+            match state with
+                | KeyDown Keys.W | KeyDown Keys.Up -> -1.f
+                | KeyDown Keys.S | KeyDown Keys.Down -> 1.f
+                | _ -> 0.f
+        Vector2(xDirection, yDirection)
     
     let getMovementVector (initialVector, state: KeyboardState) =
-        let motion = getMotion(state)
-        if motion <> Vector2.Zero
+        let inputDirection = getDirection(state)
+        if inputDirection <> Vector2.Zero
         then
-            motion.Normalize()
-            motion
+            inputDirection.Normalize()
+            let dampening = 0.05f
+            let adjustedMotion = initialVector + inputDirection * dampening
+            adjustedMotion.Normalize()
+            adjustedMotion
         else
             initialVector
 
