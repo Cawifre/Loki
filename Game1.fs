@@ -5,12 +5,6 @@ open Microsoft.Xna.Framework.Graphics
 open Microsoft.Xna.Framework.Input
 open System
 
-type Entity =
-    {
-        Physics: Physics;
-        Sprite: Sprite;
-    }
-
 type Sprite =
     {
         Texture: Texture2D;
@@ -18,15 +12,36 @@ type Sprite =
         Offset: Point;
     }
 
-    member this.Draw(position: Vector2, spriteBatch: SpriteBatch) =
+    member this.Draw(center: Vector2, spriteBatch: SpriteBatch) =
+        let topLeft = center - Vector2(float32 this.Size.X, float32 this.Size.Y) / 2.f
         let sourceRectangle = Rectangle(this.Offset, this.Size)
-        spriteBatch.Draw(this.Texture, position, Nullable.op_Implicit sourceRectangle, Color.White)
+        spriteBatch.Draw(this.Texture, topLeft, Nullable.op_Implicit sourceRectangle, Color.White)
+
+type BoundingShape =
+    | BoundingBox of Center : Vector2 * CenterToCorner : Vector2 * Rotation : float32
+    | BoundingCircle of Center : Vector2 * Radius : float32
+
+    member this.Center =
+        match this with
+        | BoundingBox(center, _, _) -> center
+        | BoundingCircle(center, _) -> center
+
+    member this.Repositioned newCenter =
+        match this with
+        | BoundingBox(_, corner, rotation) -> BoundingBox(newCenter, corner, rotation)
+        | BoundingCircle(_, radius) -> BoundingCircle(newCenter, radius)
 
 type Physics =
     {
-        Position: Vector2;
+        Bounds: BoundingShape;
         MovementDirection: Vector2;
         Speed: float32;
+    }
+
+type Entity =
+    {
+        Physics: Physics;
+        Sprite: Sprite;
     }
 
 type TileSet =
@@ -159,7 +174,7 @@ type Game1 () as this =
         spriteBatch <- new SpriteBatch(this.GraphicsDevice)
 
         ball <- { Physics = {
-                      Position = Vector2(64.f, 64.f)
+                      Bounds = BoundingCircle(Vector2(96.f, 96.f), 32.f)
                       Speed = 500.f
                       MovementDirection = Vector2(1.f, 0.f) }
                   Sprite = {
@@ -171,13 +186,19 @@ type Game1 () as this =
         if (GamePad.GetState(PlayerIndex.One).Buttons.Back = ButtonState.Pressed || Keyboard.GetState().IsKeyDown(Keys.Escape))
         then this.Exit();
 
-        let movementVector = getMovementVector(ball.Physics.MovementDirection, Keyboard.GetState())
-        let newPostion =
-            let maxX, maxY = float32 (tileLayer.CountX * tileSet.TileSizeX - ball.Sprite.Size.X), float32 (tileLayer.CountY * tileSet.TileSizeY - ball.Sprite.Size.Y)
-            let position = ball.Physics.Position + movementVector * ball.Physics.Speed * float32 gameTime.ElapsedGameTime.TotalSeconds
+        let physics = ball.Physics
+
+        let movementDirection = getMovementVector(physics.MovementDirection, Keyboard.GetState())
+
+        let newPosition =
+            let maxX, maxY = float32 (tileLayer.CountX * tileSet.TileSizeX), float32 (tileLayer.CountY * tileSet.TileSizeY)
+            let position = physics.Bounds.Center + movementDirection * physics.Speed * float32 gameTime.ElapsedGameTime.TotalSeconds
             Vector2.Clamp(position, Vector2.Zero, Vector2(maxX, maxY))
 
-        ball <- {ball with Physics = {ball.Physics with Position = newPostion; MovementDirection = movementVector}}
+        ball <- {ball with
+                    Physics = {physics with
+                                    Bounds = physics.Bounds.Repositioned newPosition
+                                    MovementDirection = movementDirection}}
 
         base.Update(gameTime)
  
@@ -187,7 +208,7 @@ type Game1 () as this =
         spriteBatch.Begin()
 
         TileLayer.draw(spriteBatch, tileSet, tileLayer)
-        ball.Sprite.Draw(ball.Physics.Position, spriteBatch)
+        ball.Sprite.Draw(ball.Physics.Bounds.Center, spriteBatch)
 
         spriteBatch.End()
 
