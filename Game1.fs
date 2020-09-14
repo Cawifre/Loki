@@ -5,19 +5,29 @@ open Microsoft.Xna.Framework.Graphics
 open Microsoft.Xna.Framework.Input
 open System
 
-type Sprite = 
+type Entity =
     {
-        Position: Vector2;
-        MovementVector: Vector2;
-        Speed: float32;
+        Physics: Physics;
+        Sprite: Sprite;
+    }
+
+type Sprite =
+    {
         Texture: Texture2D;
         Size: Point;
         Offset: Point;
     }
 
-    member this.Draw(spriteBatch: SpriteBatch) =
+    member this.Draw(position: Vector2, spriteBatch: SpriteBatch) =
         let sourceRectangle = Rectangle(this.Offset, this.Size)
-        spriteBatch.Draw(this.Texture, this.Position, Nullable.op_Implicit sourceRectangle, Color.White)
+        spriteBatch.Draw(this.Texture, position, Nullable.op_Implicit sourceRectangle, Color.White)
+
+type Physics =
+    {
+        Position: Vector2;
+        MovementDirection: Vector2;
+        Speed: float32;
+    }
 
 type TileSet =
     {
@@ -77,8 +87,7 @@ type Game1 () as this =
  
     let graphics = new GraphicsDeviceManager(this)
     let mutable spriteBatch = Unchecked.defaultof<_>
-    let mutable ballTexture = Unchecked.defaultof<Texture2D>
-    let mutable ball = Unchecked.defaultof<Sprite>
+    let mutable ball = Unchecked.defaultof<Entity>
     let mutable tileSet = Unchecked.defaultof<TileSet>
     let mutable tileLayer = Unchecked.defaultof<TileLayer>
 
@@ -149,27 +158,26 @@ type Game1 () as this =
     override this.LoadContent() =
         spriteBatch <- new SpriteBatch(this.GraphicsDevice)
 
-        ballTexture <- this.Content.Load "ball"
-
-        ball <- { Position = Vector2(64.f, 64.f)
-                  Speed = 500.f
-                  MovementVector = Vector2(1.f, 0.f)
-                  Texture = ballTexture
-                  Size = Point(64, 64)
-                  Offset = Point.Zero }
+        ball <- { Physics = {
+                      Position = Vector2(64.f, 64.f)
+                      Speed = 500.f
+                      MovementDirection = Vector2(1.f, 0.f) }
+                  Sprite = {
+                      Texture = this.Content.Load "ball"
+                      Size = Point(64, 64)
+                      Offset = Point.Zero } }
  
     override this.Update (gameTime) =
         if (GamePad.GetState(PlayerIndex.One).Buttons.Back = ButtonState.Pressed || Keyboard.GetState().IsKeyDown(Keys.Escape))
         then this.Exit();
 
-        let movementVector = getMovementVector(ball.MovementVector, Keyboard.GetState())
-
+        let movementVector = getMovementVector(ball.Physics.MovementDirection, Keyboard.GetState())
         let newPostion =
-            let maxX, maxY = float32 (tileLayer.CountX * tileSet.TileSizeX - ball.Size.X), float32 (tileLayer.CountY * tileSet.TileSizeY - ball.Size.Y)
-            let position = ball.Position + movementVector * ball.Speed * float32 gameTime.ElapsedGameTime.TotalSeconds
+            let maxX, maxY = float32 (tileLayer.CountX * tileSet.TileSizeX - ball.Sprite.Size.X), float32 (tileLayer.CountY * tileSet.TileSizeY - ball.Sprite.Size.Y)
+            let position = ball.Physics.Position + movementVector * ball.Physics.Speed * float32 gameTime.ElapsedGameTime.TotalSeconds
             Vector2.Clamp(position, Vector2.Zero, Vector2(maxX, maxY))
 
-        ball <- {ball with Position = newPostion; MovementVector = movementVector}
+        ball <- {ball with Physics = {ball.Physics with Position = newPostion; MovementDirection = movementVector}}
 
         base.Update(gameTime)
  
@@ -179,7 +187,7 @@ type Game1 () as this =
         spriteBatch.Begin()
 
         TileLayer.draw(spriteBatch, tileSet, tileLayer)
-        ball.Draw(spriteBatch)
+        ball.Sprite.Draw(ball.Physics.Position, spriteBatch)
 
         spriteBatch.End()
 
