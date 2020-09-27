@@ -4,6 +4,7 @@ open Microsoft.Xna.Framework
 open Microsoft.Xna.Framework.Graphics
 open Microsoft.Xna.Framework.Input
 open System
+open MonoGame.Extended
 
 type Sprite =
     {
@@ -56,32 +57,75 @@ type Physics =
         Speed: float32;
     }
 
+type LineSegment = LineSegment of Vector2 * Vector2
+
+module LineSegment =
+
+    let fromBounds (bounds: BoundingBox) =
+        match bounds with
+        | rotated when rotated.Rotation <> 0.f -> raise (NotImplementedException())
+        | aabb ->
+            [aabb.CenterToCorner
+             aabb.CenterToCorner * Vector2(-1.f, 1.f)
+             aabb.CenterToCorner * Vector2(-1.f, -1.f)
+             aabb.CenterToCorner * Vector2(1.f, -1.f)
+             aabb.CenterToCorner]
+                |> List.map (fun (corner) -> aabb.Center + corner)
+                |> List.pairwise
+                |> List.map (fun (a, b) -> LineSegment(a,b))
+
+    let intersectSegment (LineSegment(a1, a2)) (LineSegment(b1, b2)) =
+        let denominator = (b2.Y - b1.Y) * (a2.X - a1.X) - (b2.X - b1.X) * (a2.Y - a1.Y)
+        if denominator = 0.f then None // segments are parallel
+        else
+            let uA = ((b2.X - b1.X) * (a1.Y - b1.Y) - (b2.Y - b1.Y) * (a1.X - b1.X)) / denominator
+            let uB = ((a2.X - a1.X) * (a1.Y - b1.Y) - (a2.Y - a1.Y) * (a1.X - b1.X)) / denominator
+            if uA < 0.f || uA > 1.f || uB < 0.f || uB > 1.f then None // intersection of lines is outside segment(s)
+            else
+                let x = a1.X + uA * (a2.X - a1.X)
+                let y = a1.Y + uA * (a2.Y - a1.Y)
+                let intersection = Vector2(x, y)
+                Some(intersection, LineSegment(a1, a2), LineSegment(b1, b2))
+
+    let intersectBox (box: BoundingBox) segment =
+        let intersection =
+            fromBounds box
+            |> List.choose (intersectSegment segment)
+            |> List.sortBy (fun (intersection, LineSegment(start, _), _) -> Vector2.Distance(start, intersection))
+            |> List.tryHead
+        match intersection with
+        | None -> None
+        | Some(intersectionPoint, _, LineSegment(b1, b2)) ->
+            let tangent = Vector2.Normalize (b2 - b1)
+            Some(tangent.PerpendicularCounterClockwise(), intersectionPoint)
+
 type Contact = 
     {
         Physics: Physics;
         Movement: Vector2;
         ImmovableObject: BoundingBox;
         Normal: Vector2;
+        Intersection: Vector2;
         TransformReversals: seq<Matrix>;
     }
 
 module Contact =
 
-    let normal (movement: Vector2) (box: BoundingBox) =
-        Vector2.Negate movement |> Vector2.Normalize // TODO: Stop lying
-
-    let create (physics: Physics) (movement: Vector2) (immovableObject: BoundingShape) =
+    let create (physics: Physics) (movement: Vector2) (immovableObject: BoundingBox) =
         match immovableObject with
-        | BoundingCircle(_) -> raise (NotImplementedException())
-        | BoundingBox(b) when b.Rotation <> 0.f -> raise (NotImplementedException())
-        | BoundingBox(b) -> let normal = normal movement b
-                            {
-                                Physics = physics;
-                                Movement = movement;
-                                ImmovableObject = b;
-                                Normal = normal;
-                                TransformReversals = Seq.empty
-                            }
+        | _ when immovableObject.Rotation <> 0.f -> raise (NotImplementedException())
+        | _ ->
+            let movementSegment = LineSegment(physics.Bounds.Center, physics.Bounds.Center + movement)
+            match LineSegment.intersectBox immovableObject movementSegment with
+            | None -> None
+            | Some(normal, intersection) -> Some({
+                                       Physics = physics;
+                                       Movement = movement;
+                                       ImmovableObject = immovableObject;
+                                       Normal = normal;
+                                       Intersection = intersection;
+                                       TransformReversals = Seq.empty;
+                                   })
 
 type Entity =
     {
@@ -171,17 +215,22 @@ module TileLayer =
 module Collision =
 
     let reflect (contact: Contact) =
-        let reflectedPhysics = { contact.Physics with 
+        let reflectedPhysics = { contact.Physics with
                                                  MovementDirection = Vector2.Reflect(contact.Physics.MovementDirection, contact.Normal);
+                                                 Bounds = contact.Physics.Bounds.Repositioned(contact.Intersection - Vector2.Normalize contact.Movement)
                                }
-        let distance = Vector2.Distance(contact.Physics.Bounds.Center, contact.ImmovableObject.Center)
+        let distance = Vector2.Distance(contact.Physics.Bounds.Center, contact.Intersection)
         (contact, reflectedPhysics, distance)
 
     let innerCollide (lastTickPhysics: Physics) (physics: Physics) (immovableObject: BoundingShape) =
 
         let movement = physics.Bounds.Center - lastTickPhysics.Bounds.Center
-        let contact = Contact.create lastTickPhysics movement immovableObject
-        Some(reflect contact)
+        match immovableObject with
+        | BoundingCircle(_) -> raise (NotImplementedException())
+        | BoundingBox(box) ->
+            match Contact.create lastTickPhysics movement box with
+            | None -> None
+            | Some(contact) -> Some(reflect contact)
 
     let collide (tileLayer: TileLayer) (tileSet: TileSet) (lastTickPhysics: Physics) (physics: Physics) =
 
@@ -274,9 +323,9 @@ type Game1 () as this =
         spriteBatch <- new SpriteBatch(this.GraphicsDevice)
 
         ball <- { Physics = {
-                      Bounds = BoundingCircle({ Center = Vector2(96.f, 96.f); Radius = 32.f })
+                      Bounds = BoundingCircle({ Center = Vector2(96.f, 96.f); Radius = 0.f })
                       Speed = 500.f
-                      MovementDirection = Vector2.Normalize Vector2.One }
+                      MovementDirection = Vector2.Normalize(Vector2(2.f, 1.f)) }
                   Sprite = {
                       Texture = this.Content.Load "ball"
                       Size = Point(64, 64)
