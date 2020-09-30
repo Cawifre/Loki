@@ -31,33 +31,11 @@ type BoundingCircle =
         Radius: float32;
     }
 
-type BoundingShape =
-    | BoundingBox of BoundingBox
-    | BoundingCircle of BoundingCircle
-
-    member this.Center =
-        match this with
-        | BoundingBox(b) -> b.Center
-        | BoundingCircle(c) -> c.Center
-
-    member this.Sweep =
-        match this with
-        | BoundingBox(b) -> b.CenterToCorner.Length()
-        | BoundingCircle(c) -> c.Radius
-
-    member this.Repositioned newCenter =
-        match this with
-        | BoundingBox(b) -> BoundingBox { Center = newCenter; CenterToCorner = b.CenterToCorner; Rotation = b.Rotation }
-        | BoundingCircle(c) -> BoundingCircle { Center = newCenter; Radius = c.Radius }
-
-type Physics =
+type LineSegment =
     {
-        Bounds: BoundingShape;
-        MovementDirection: Vector2;
-        Speed: float32;
+        A: Vector2;
+        B: Vector2
     }
-
-type LineSegment = LineSegment of Vector2 * Vector2
 
 module LineSegment =
 
@@ -72,9 +50,11 @@ module LineSegment =
              aabb.CenterToCorner]
                 |> List.map (fun (corner) -> aabb.Center + corner)
                 |> List.pairwise
-                |> List.map (fun (a, b) -> LineSegment(a,b))
+                |> List.map (fun (a, b) -> {A = a; B = b})
 
-    let intersectSegment (LineSegment(a1, a2)) (LineSegment(b1, b2)) =
+    let intersectSegment (a: LineSegment) (b: LineSegment) =
+        let a1, a2 = a.A, a.B
+        let b1, b2 = b.A, b.B
         let denominator = (b2.Y - b1.Y) * (a2.X - a1.X) - (b2.X - b1.X) * (a2.Y - a1.Y)
         if denominator = 0.f then None // segments are parallel
         else
@@ -85,25 +65,97 @@ module LineSegment =
                 let x = a1.X + uA * (a2.X - a1.X)
                 let y = a1.Y + uA * (a2.Y - a1.Y)
                 let intersection = Vector2(x, y)
-                Some(intersection, LineSegment(a1, a2), LineSegment(b1, b2))
+                Some(intersection, a, b)
 
     let intersectBox (box: BoundingBox) segment =
         let intersection =
             fromBounds box
             |> List.choose (intersectSegment segment)
-            |> List.sortBy (fun (intersection, LineSegment(start, _), _) -> Vector2.Distance(start, intersection))
+            |> List.sortBy (fun (intersection, a, _) -> Vector2.Distance(a.A, intersection))
             |> List.tryHead
         match intersection with
         | None -> None
-        | Some(intersectionPoint, _, LineSegment(b1, b2)) ->
+        | Some(intersectionPoint, _, { A = b1; B = b2 }) ->
             let tangent = Vector2.Normalize (b2 - b1)
             Some(tangent.PerpendicularCounterClockwise(), intersectionPoint)
+
+    let intersectCircle (circle: BoundingCircle) segment =
+        raise (NotImplementedException())
+
+type BoundingShape =
+    | BoundingBox of BoundingBox
+    | BoundingCircle of BoundingCircle
+    | LineSegment of LineSegment
+
+    member this.Center =
+        match this with
+        | BoundingBox b -> b.Center
+        | BoundingCircle c -> c.Center
+        | LineSegment s -> Vector2((s.B.X - s.A.X) / 2.f, (s.B.Y - s.A.Y) / 2.f)
+
+    member this.Sweep =
+        match this with
+        | BoundingBox b -> b.CenterToCorner.Length()
+        | BoundingCircle c -> c.Radius
+        | LineSegment s -> Vector2.Distance(this.Center, s.B)
+
+    member this.Repositioned newCenter =
+        match this with
+        | BoundingBox b -> BoundingBox { Center = newCenter; CenterToCorner = b.CenterToCorner; Rotation = b.Rotation }
+        | BoundingCircle c -> BoundingCircle { Center = newCenter; Radius = c.Radius }
+        | LineSegment s ->
+            let displacement = newCenter - this.Center
+            LineSegment { A = s.A + displacement; B = s.B + displacement }
+
+module BoundingShape =
+
+    let explodeCircle radius (circle: BoundingCircle) =
+        [BoundingCircle({ circle with Radius = circle.Radius + radius })]
+
+    let explodeBox radius (box: BoundingBox) =
+        if box.Rotation <> 0.f then raise (NotImplementedException())
+        else
+            let cornerCircles = [box.CenterToCorner
+                                 box.CenterToCorner * Vector2(-1.f, 1.f)
+                                 box.CenterToCorner * Vector2(-1.f, -1.f)
+                                 box.CenterToCorner * Vector2(1.f, -1.f)]
+                                |> List.map (fun corner -> BoundingCircle({ Center = box.Center + corner; Radius = radius }))
+
+            let bottomRight, topLeft = box.Center + box.CenterToCorner,
+                                       box.Center - box.CenterToCorner
+            let bottomLeft, topRight = Vector2(box.Center.X - box.CenterToCorner.X, box.Center.Y + box.CenterToCorner.Y),
+                                       Vector2(box.Center.X + box.CenterToCorner.X, box.Center.Y - box.CenterToCorner.Y)
+
+            let segments = [Vector2(bottomRight.X, bottomRight.Y + radius), Vector2(bottomLeft.X, bottomLeft.Y + radius)
+                            Vector2(bottomLeft.X - radius, bottomLeft.Y), Vector2(topLeft.X - radius, topLeft.Y)
+                            Vector2(topLeft.X, topLeft.Y - radius), Vector2(topRight.X, topRight.Y - radius)
+                            Vector2(topRight.X + radius, topRight.Y), Vector2(bottomRight.X + radius, bottomRight.Y)]
+                           |> List.map (fun (a, b) -> LineSegment({ A = a; B = b }))
+
+            List.append segments cornerCircles
+
+    let explodeSegment radius (segment: LineSegment) =
+        raise (NotImplementedException())
+        [LineSegment(segment)] // TODO: Actually explode into two segments and two circle caps
+
+    let explode radius (bounds: BoundingShape) =
+        match bounds with
+        | BoundingCircle c -> explodeCircle radius c
+        | BoundingBox b -> explodeBox radius b
+        | LineSegment s -> explodeSegment radius s
+
+type Physics =
+    {
+        Bounds: BoundingShape;
+        MovementDirection: Vector2;
+        Speed: float32;
+    }
 
 type Contact = 
     {
         Physics: Physics;
         Movement: Vector2;
-        ImmovableObject: BoundingBox;
+        ImmovableObject: BoundingShape;
         Normal: Vector2;
         Intersection: Vector2;
         TransformReversals: seq<Matrix>;
@@ -111,21 +163,68 @@ type Contact =
 
 module Contact =
 
-    let create (physics: Physics) (movement: Vector2) (immovableObject: BoundingBox) =
-        match immovableObject with
-        | _ when immovableObject.Rotation <> 0.f -> raise (NotImplementedException())
-        | _ ->
-            let movementSegment = LineSegment(physics.Bounds.Center, physics.Bounds.Center + movement)
+    let fromBox (physics: Physics) (movement: Vector2) (immovableObject: BoundingBox) =
+        if immovableObject.Rotation <> 0.f then raise (NotImplementedException())
+        else
+            let movementSegment =
+                {
+                    A = physics.Bounds.Center;
+                    B = physics.Bounds.Center + movement;
+                }
+
             match LineSegment.intersectBox immovableObject movementSegment with
             | None -> None
             | Some(normal, intersection) -> Some({
-                                       Physics = physics;
-                                       Movement = movement;
-                                       ImmovableObject = immovableObject;
-                                       Normal = normal;
-                                       Intersection = intersection;
-                                       TransformReversals = Seq.empty;
-                                   })
+                                                    Physics = physics;
+                                                    Movement = movement;
+                                                    ImmovableObject = BoundingBox(immovableObject);
+                                                    Normal = normal;
+                                                    Intersection = intersection;
+                                                    TransformReversals = Seq.empty;
+                                                })
+
+    let fromCircle (physics: Physics) (movement: Vector2) (immovableObject: BoundingCircle) =
+        let movementSegment =
+            {
+                A = physics.Bounds.Center;
+                B = physics.Bounds.Center + movement;
+            }
+
+        match LineSegment.intersectCircle immovableObject movementSegment with
+        | None -> None
+        | Some(normal, intersection) -> Some({
+                                                Physics = physics;
+                                                Movement = movement;
+                                                ImmovableObject = BoundingCircle(immovableObject);
+                                                Normal = normal;
+                                                Intersection = intersection;
+                                                TransformReversals = Seq.empty;
+                                             })
+
+    let fromSegment (physics: Physics) (movement: Vector2) (immovableObject: LineSegment) =
+        let movementSegment =
+            {
+                A = physics.Bounds.Center;
+                B = physics.Bounds.Center + movement;
+            }
+
+        match LineSegment.intersectSegment movementSegment immovableObject with
+        | None -> None
+        | Some(intersection, _, b) -> Some({
+                                                Physics = physics;
+                                                Movement = movement;
+                                                ImmovableObject = LineSegment(immovableObject);
+                                                Normal = (b.B - b.A).PerpendicularCounterClockwise();
+                                                Intersection = intersection;
+                                                TransformReversals = Seq.empty;
+                                           })
+
+    let fromShape (physics: Physics) (movement: Vector2) (immovableObject: BoundingShape) =
+        match immovableObject with
+        | BoundingBox(box) -> fromBox physics movement box
+        | BoundingCircle(circle) -> fromCircle physics movement circle
+        | LineSegment(segment) -> fromSegment physics movement segment
+
 
 type Entity =
     {
@@ -212,6 +311,13 @@ module TileLayer =
                     let destination = Rectangle(x * tileSet.TileSizeX, y * tileSet.TileSizeY, tileSet.TileSizeX, tileSet.TileSizeY)
                     spriteBatch.Draw(tileSet.Texture, destination, Nullable.op_Implicit tileSet.Tiles.[tileIndex], Color.White)
 
+type CollisionResolution =
+    {
+        Contact: Contact;
+        ResolvedPhysics: Physics;
+        EventDistance: float32;
+    }
+
 module Collision =
 
     let reflect (contact: Contact) =
@@ -220,17 +326,22 @@ module Collision =
                                                  Bounds = contact.Physics.Bounds.Repositioned(contact.Intersection - Vector2.Normalize contact.Movement)
                                }
         let distance = Vector2.Distance(contact.Physics.Bounds.Center, contact.Intersection)
-        (contact, reflectedPhysics, distance)
+        {
+            Contact = contact;
+            ResolvedPhysics = reflectedPhysics;
+            EventDistance = distance;
+        }
 
     let innerCollide (lastTickPhysics: Physics) (physics: Physics) (immovableObject: BoundingShape) =
 
         let movement = physics.Bounds.Center - lastTickPhysics.Bounds.Center
-        match immovableObject with
-        | BoundingCircle(_) -> raise (NotImplementedException())
-        | BoundingBox(box) ->
-            match Contact.create lastTickPhysics movement box with
-            | None -> None
-            | Some(contact) -> Some(reflect contact)
+        match physics.Bounds with
+        | BoundingBox(_) -> raise (NotImplementedException())
+        | LineSegment(_) -> raise (NotImplementedException())
+        | BoundingCircle(circle) ->
+            BoundingShape.explode circle.Radius immovableObject
+            |> List.choose (Contact.fromShape lastTickPhysics movement)
+            |> List.choose (fun contact -> Some(reflect contact))
 
     let collide (tileLayer: TileLayer) (tileSet: TileSet) (lastTickPhysics: Physics) (physics: Physics) =
 
@@ -239,13 +350,13 @@ module Collision =
         let max = Vector2.Max(lastTickPhysics.Bounds.Center, physics.Bounds.Center) + sweep
         
         TileLayer.getTiles min max (tileSet, tileLayer)
-        |> Seq.choose (fun (isFilled, x, y) -> if isFilled then Some(TileSet.tileToBounds x y tileSet) else None)
-        |> Seq.choose(fun (bounds) -> innerCollide lastTickPhysics physics bounds)
-        |> Seq.sortBy(fun (_, _, distance) -> distance)
-        |> Seq.tryHead
+        |> List.choose (fun (isFilled, x, y) -> if isFilled then Some(TileSet.tileToBounds x y tileSet) else None)
+        |> List.collect (fun bounds -> innerCollide lastTickPhysics physics bounds)
+        |> List.sortBy (fun resolution -> resolution.EventDistance)
+        |> List.tryHead
         |> function
            | None -> physics
-           | Some(_, newPhysics, _) -> newPhysics
+           | Some(resolution) -> resolution.ResolvedPhysics
 
 type Game1 () as this =
     inherit Game()
@@ -299,16 +410,16 @@ type Game1 () as this =
             [| 2;2;2;2;2;2;2;2;2;2;
                2;0;0;0;0;0;0;0;0;2;
                2;0;0;0;0;0;0;0;0;2;
+               2;0;0;0;0;0;4;0;0;2;
+               2;0;0;0;0;0;0;0;0;2;
+               2;0;0;1;0;0;0;0;0;2;
                2;0;0;0;0;0;0;0;0;2;
                2;0;0;0;0;0;0;0;0;2;
                2;0;0;0;0;0;0;0;0;2;
                2;0;0;0;0;0;0;0;0;2;
+               2;0;0;0;0;0;0;1;0;2;
                2;0;0;0;0;0;0;0;0;2;
-               2;0;0;0;0;0;0;0;0;2;
-               2;0;0;0;0;0;0;0;0;2;
-               2;0;0;0;0;0;0;0;0;2;
-               2;0;0;0;0;0;0;0;0;2;
-               2;0;0;0;0;0;0;0;0;2;
+               2;0;0;3;0;0;0;0;0;2;
                2;0;0;0;0;0;0;0;0;2;
                2;2;2;2;2;2;2;2;2;2 |]
         tileLayer <- {
@@ -348,7 +459,7 @@ type Game1 () as this =
         let proposedPhysics = { physics with
                                         Bounds = physics.Bounds.Repositioned newPosition
                                         MovementDirection = movementDirection }
-        let newPhysics = Collision.collide tileLayer tileSet ball.Physics proposedPhysics
+        let newPhysics = Collision.collide tileLayer tileSet physics proposedPhysics
 
         ball <- { ball with Physics = newPhysics }
 
