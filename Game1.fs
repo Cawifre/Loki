@@ -6,6 +6,17 @@ open Microsoft.Xna.Framework.Input
 open System
 open MonoGame.Extended
 
+module Math =
+
+    let solveQuadratic a b c =
+        let d = b * b - 4.f * a * c
+        if a = 0.f || d < 0.f then
+            None
+        else
+            let root1 = (-b + sqrt d) / 2.f / a
+            let root2 = (-b - sqrt d) / 2.f / a
+            Some(root1, root2)
+
 type Sprite =
     {
         Texture: Texture2D;
@@ -67,7 +78,7 @@ module LineSegment =
                 let intersection = Vector2(x, y)
                 Some(intersection, a, b)
 
-    let intersectBox (box: BoundingBox) segment =
+    let intersectBox (box: BoundingBox) (segment: LineSegment) =
         let intersection =
             fromBounds box
             |> List.choose (intersectSegment segment)
@@ -79,8 +90,46 @@ module LineSegment =
             let tangent = Vector2.Normalize (b2 - b1)
             Some(tangent.PerpendicularCounterClockwise(), intersectionPoint)
 
-    let intersectCircle (circle: BoundingCircle) segment =
-        raise (NotImplementedException())
+    let intersectCircle (circle: BoundingCircle) (segment: LineSegment) =
+        let translateToOrigin = Matrix2.CreateTranslation -circle.Center
+        let reverseTranslate = Matrix2.CreateTranslation circle.Center
+
+        let segmentAtOrigin = { segment with 
+                                  A = translateToOrigin.Transform segment.A
+                                  B = translateToOrigin.Transform segment.B
+                              }
+
+        // solve intersection between
+        //  x^2 + y^2 = r^2
+        // and
+        //  y = mx + c
+        let slope =
+            (segmentAtOrigin.B - segmentAtOrigin.A)
+            |> (fun v -> if v.X < 0.f then -v else v)
+            |> (fun v -> v.Y / v.X)
+        let yIntersect = segmentAtOrigin.A.Y - (slope * segmentAtOrigin.A.X)
+        let roots = Math.solveQuadratic (slope * slope + 1.f) (2.f * yIntersect * slope) (yIntersect * yIntersect - circle.Radius * circle.Radius)
+
+        let intersectAt (x: float32) =
+            let y = slope * x + yIntersect
+            let intersection = Vector2(x, y)
+            let normal = Vector2.Normalize intersection
+            (normal, reverseTranslate.Transform intersection)
+
+        let onSegment (x: float32) =
+            let min = min segmentAtOrigin.A.X segmentAtOrigin.B.X
+            let max = max segmentAtOrigin.A.X segmentAtOrigin.B.X
+            min < x && x < max
+
+        match roots with
+        | None -> None
+        | Some(x1, x2) when x1 = x2 -> if onSegment x1 then Some(intersectAt x1) else None
+        | Some(x1, x2) ->
+            [x1; x2]
+            |> List.filter onSegment
+            |> List.map intersectAt
+            |> List.sortBy (fun (_, p) -> Vector2.Distance(segment.A, p))
+            |> List.tryHead
 
 type BoundingShape =
     | BoundingBox of BoundingBox
@@ -153,12 +202,12 @@ type Physics =
 
 type Contact = 
     {
+        Intersection: Vector2;
+        Normal: Vector2;
+        ImmovableObject: BoundingShape;
         Physics: Physics;
         Movement: Vector2;
-        ImmovableObject: BoundingShape;
-        Normal: Vector2;
-        Intersection: Vector2;
-        TransformReversals: seq<Matrix>;
+        TransformReversals: list<Matrix>;
     }
 
 module Contact =
@@ -180,7 +229,7 @@ module Contact =
                                                     ImmovableObject = BoundingBox(immovableObject);
                                                     Normal = normal;
                                                     Intersection = intersection;
-                                                    TransformReversals = Seq.empty;
+                                                    TransformReversals = List.empty;
                                                 })
 
     let fromCircle (physics: Physics) (movement: Vector2) (immovableObject: BoundingCircle) =
@@ -198,7 +247,7 @@ module Contact =
                                                 ImmovableObject = BoundingCircle(immovableObject);
                                                 Normal = normal;
                                                 Intersection = intersection;
-                                                TransformReversals = Seq.empty;
+                                                TransformReversals = List.empty;
                                              })
 
     let fromSegment (physics: Physics) (movement: Vector2) (immovableObject: LineSegment) =
@@ -214,9 +263,9 @@ module Contact =
                                                 Physics = physics;
                                                 Movement = movement;
                                                 ImmovableObject = LineSegment(immovableObject);
-                                                Normal = (b.B - b.A).PerpendicularCounterClockwise();
+                                                Normal = Vector2.Normalize ((b.B - b.A).PerpendicularCounterClockwise());
                                                 Intersection = intersection;
-                                                TransformReversals = Seq.empty;
+                                                TransformReversals = List.empty;
                                            })
 
     let fromShape (physics: Physics) (movement: Vector2) (immovableObject: BoundingShape) =
@@ -323,7 +372,7 @@ module Collision =
     let reflect (contact: Contact) =
         let reflectedPhysics = { contact.Physics with
                                                  MovementDirection = Vector2.Reflect(contact.Physics.MovementDirection, contact.Normal);
-                                                 Bounds = contact.Physics.Bounds.Repositioned(contact.Intersection - Vector2.Normalize contact.Movement)
+                                                 Bounds = contact.Physics.Bounds.Repositioned(contact.Intersection)
                                }
         let distance = Vector2.Distance(contact.Physics.Bounds.Center, contact.Intersection)
         {
@@ -349,11 +398,14 @@ module Collision =
         let min = Vector2.Min(lastTickPhysics.Bounds.Center, physics.Bounds.Center) - sweep
         let max = Vector2.Max(lastTickPhysics.Bounds.Center, physics.Bounds.Center) + sweep
         
-        TileLayer.getTiles min max (tileSet, tileLayer)
-        |> List.choose (fun (isFilled, x, y) -> if isFilled then Some(TileSet.tileToBounds x y tileSet) else None)
-        |> List.collect (fun bounds -> innerCollide lastTickPhysics physics bounds)
-        |> List.sortBy (fun resolution -> resolution.EventDistance)
-        |> List.tryHead
+        let contacts =
+          TileLayer.getTiles min max (tileSet, tileLayer)
+          |> List.choose (fun (isFilled, x, y) -> if isFilled then Some(TileSet.tileToBounds x y tileSet) else None)
+          |> List.collect (fun bounds -> innerCollide lastTickPhysics physics bounds)
+          |> List.filter (fun resolution -> resolution.EventDistance > 0.f)
+          |> List.sortBy (fun resolution -> resolution.EventDistance)
+
+        List.tryHead contacts
         |> function
            | None -> physics
            | Some(resolution) -> resolution.ResolvedPhysics
@@ -434,9 +486,9 @@ type Game1 () as this =
         spriteBatch <- new SpriteBatch(this.GraphicsDevice)
 
         ball <- { Physics = {
-                      Bounds = BoundingCircle({ Center = Vector2(96.f, 96.f); Radius = 0.f })
-                      Speed = 500.f
-                      MovementDirection = Vector2.Normalize(Vector2(2.f, 1.f)) }
+                      Bounds = BoundingCircle({ Center = Vector2(32.f + 1.f * 64.f,32.f + 1.f * 64.f); Radius = 32.f })
+                      Speed = 300.f
+                      MovementDirection = Vector2.Normalize(Vector2(1.f, 7.f)) }
                   Sprite = {
                       Texture = this.Content.Load "ball"
                       Size = Point(64, 64)
