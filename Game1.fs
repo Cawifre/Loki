@@ -392,7 +392,7 @@ module Collision =
             |> List.choose (Contact.fromShape lastTickPhysics movement)
             |> List.choose (fun contact -> Some(reflect contact))
 
-    let collide (tileLayer: TileLayer) (tileSet: TileSet) (lastTickPhysics: Physics) (physics: Physics) =
+    let collide (tileLayer: TileLayer) (tileSet: TileSet) (lastTickPhysics: Physics) (physics: Physics) (bounceCount: int)=
 
         let sweep = Vector2 physics.Bounds.Sweep
         let min = Vector2.Min(lastTickPhysics.Bounds.Center, physics.Bounds.Center) - sweep
@@ -407,8 +407,8 @@ module Collision =
 
         List.tryHead contacts
         |> function
-           | None -> physics
-           | Some(resolution) -> resolution.ResolvedPhysics
+           | None -> (physics, bounceCount)
+           | Some(resolution) -> (resolution.ResolvedPhysics, bounceCount + 1)
 
 type Game1 () as this =
     inherit Game()
@@ -419,8 +419,9 @@ type Game1 () as this =
     let mutable tileSet = Unchecked.defaultof<TileSet>
     let mutable tileLayer = Unchecked.defaultof<TileLayer>
     let mutable fonts = Unchecked.defaultof<Map<string, SpriteFont>>
+    let mutable bounceCount = 0
 
-    let defaultBallPhysics = { Bounds = BoundingCircle({ Center = Vector2(32.f + 1.f * 64.f,32.f + 1.f * 64.f); Radius = 32.f })
+    let defaultBallPhysics = { Bounds = BoundingCircle({ Center = Vector2(32.f + 1.6f * 64.f,32.f + 1.f * 64.f); Radius = 32.f })
                                Speed = 300.f
                                MovementDirection = Vector2.Normalize(Vector2(1.f, 7.f)) }
 
@@ -518,9 +519,10 @@ type Game1 () as this =
         let proposedPhysics = { physics with
                                         Bounds = physics.Bounds.Repositioned newPosition
                                         MovementDirection = movementDirection }
-        let newPhysics = Collision.collide tileLayer tileSet physics proposedPhysics
+        let newPhysics, newBounceCount = Collision.collide tileLayer tileSet physics proposedPhysics bounceCount
 
         ball <- { ball with Physics = newPhysics }
+        bounceCount <- if resetBall then 0 else newBounceCount
 
         base.Update(gameTime)
  
@@ -536,6 +538,7 @@ type Game1 () as this =
                             [
                                 sprintf "Ball.X: %f" ball.Physics.Bounds.Center.X
                                 sprintf "Ball.Y: %f" ball.Physics.Bounds.Center.Y
+                                sprintf "Bounces: %i" bounceCount
                             ])
         spriteBatch.DrawString(fonts.["consolas12"], debugInfo, Vector2.One, Color.White)
 
