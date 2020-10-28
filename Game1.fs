@@ -418,6 +418,7 @@ type Game1 () as this =
     let mutable ball = Unchecked.defaultof<Entity>
     let mutable tileSet = Unchecked.defaultof<TileSet>
     let mutable tileLayer = Unchecked.defaultof<TileLayer>
+    let mutable fonts = Unchecked.defaultof<Map<string, SpriteFont>>
 
     let (|KeyDown|_|) k (state: KeyboardState) =
         if state.IsKeyDown k then Some() else None
@@ -485,6 +486,10 @@ type Game1 () as this =
     override this.LoadContent() =
         spriteBatch <- new SpriteBatch(this.GraphicsDevice)
 
+        fonts <- Map([
+                    "consolas12", this.Content.Load "Consolas12"
+                    ])
+
         ball <- { Physics = {
                       Bounds = BoundingCircle({ Center = Vector2(32.f + 1.f * 64.f,32.f + 1.f * 64.f); Radius = 32.f })
                       Speed = 300.f
@@ -524,6 +529,13 @@ type Game1 () as this =
 
         TileLayer.draw(spriteBatch, tileSet, tileLayer)
         ball.Sprite.Draw(ball.Physics.Bounds.Center, spriteBatch)
+
+        let debugInfo = String.Join("\n",
+                            [
+                                sprintf "Ball.X: %f" ball.Physics.Bounds.Center.X
+                                sprintf "Ball.Y: %f" ball.Physics.Bounds.Center.Y
+                            ])
+        spriteBatch.DrawString(fonts.["consolas12"], debugInfo, Vector2.One, Color.White)
 
         spriteBatch.End()
 

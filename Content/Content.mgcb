@@ -37,3 +37,10 @@
 /processorParam:TextureFormat=Color
 /build:BlackAndWhiteBlocks.png
 
+#begin Consolas12.spritefont
+/importer:FontDescriptionImporter
+/processor:FontDescriptionProcessor
+/processorParam:PremultiplyAlpha=True
+/processorParam:TextureFormat=Compressed
+/build:Consolas12.spritefont
+
