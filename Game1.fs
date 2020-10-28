@@ -420,6 +420,10 @@ type Game1 () as this =
     let mutable tileLayer = Unchecked.defaultof<TileLayer>
     let mutable fonts = Unchecked.defaultof<Map<string, SpriteFont>>
 
+    let defaultBallPhysics = { Bounds = BoundingCircle({ Center = Vector2(32.f + 1.f * 64.f,32.f + 1.f * 64.f); Radius = 32.f })
+                               Speed = 300.f
+                               MovementDirection = Vector2.Normalize(Vector2(1.f, 7.f)) }
+
     let (|KeyDown|_|) k (state: KeyboardState) =
         if state.IsKeyDown k then Some() else None
 
@@ -490,10 +494,7 @@ type Game1 () as this =
                     "consolas12", this.Content.Load "Consolas12"
                     ])
 
-        ball <- { Physics = {
-                      Bounds = BoundingCircle({ Center = Vector2(32.f + 1.f * 64.f,32.f + 1.f * 64.f); Radius = 32.f })
-                      Speed = 300.f
-                      MovementDirection = Vector2.Normalize(Vector2(1.f, 7.f)) }
+        ball <- { Physics = defaultBallPhysics
                   Sprite = {
                       Texture = this.Content.Load "ball"
                       Size = Point(64, 64)
@@ -504,7 +505,8 @@ type Game1 () as this =
         if (GamePad.GetState(PlayerIndex.One).Buttons.Back = ButtonState.Pressed || keyboardState.IsKeyDown(Keys.Escape))
         then this.Exit();
 
-        let physics = ball.Physics
+        let resetBall = keyboardState.IsKeyDown(Keys.R)
+        let physics = if resetBall then defaultBallPhysics else ball.Physics
 
         let movementDirection = getMovementVector(physics.MovementDirection, keyboardState)
 
