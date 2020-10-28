@@ -370,9 +370,11 @@ type CollisionResolution =
 module Collision =
 
     let reflect (contact: Contact) =
+        let nudgeSize = 0.0001f
+        let nudge = (contact.Movement |> Vector2.Negate |> Vector2.Normalize) * nudgeSize
         let reflectedPhysics = { contact.Physics with
                                                  MovementDirection = Vector2.Reflect(contact.Physics.MovementDirection, contact.Normal);
-                                                 Bounds = contact.Physics.Bounds.Repositioned(contact.Intersection)
+                                                 Bounds = contact.Physics.Bounds.Repositioned(contact.Intersection + nudge)
                                }
         let distance = Vector2.Distance(contact.Physics.Bounds.Center, contact.Intersection)
         {
