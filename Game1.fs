@@ -277,8 +277,9 @@ module Contact =
 
 type Entity =
     {
-        Physics: Physics;
-        Sprite: Sprite;
+        ID: int
+        Physics: Physics
+        Sprite: Sprite
     }
 
 type TileSet =
@@ -360,6 +361,12 @@ module TileLayer =
                     let destination = Rectangle(x * tileSet.TileSizeX, y * tileSet.TileSizeY, tileSet.TileSizeX, tileSet.TileSizeY)
                     spriteBatch.Draw(tileSet.Texture, destination, Nullable.op_Implicit tileSet.Tiles.[tileIndex], Color.White)
 
+type Block =
+    {
+        Entity: Entity
+        HitPoints: int
+    }
+
 type CollisionResolution =
     {
         Contact: Contact;
@@ -394,23 +401,43 @@ module Collision =
             |> List.choose (Contact.fromShape lastTickPhysics movement)
             |> List.choose (fun contact -> Some(reflect contact))
 
-    let collide (tileLayer: TileLayer) (tileSet: TileSet) (lastTickPhysics: Physics) (physics: Physics) (bounceCount: int)=
+    let collide (blocks: List<Block>) (tileLayer: TileLayer) (tileSet: TileSet) (lastTickPhysics: Physics) (physics: Physics) (bounceCount: int)=
 
         let sweep = Vector2 physics.Bounds.Sweep
         let min = Vector2.Min(lastTickPhysics.Bounds.Center, physics.Bounds.Center) - sweep
         let max = Vector2.Max(lastTickPhysics.Bounds.Center, physics.Bounds.Center) + sweep
         
-        let contacts =
+        let tileResolutions =
           TileLayer.getTiles min max (tileSet, tileLayer)
           |> List.choose (fun (isFilled, x, y) -> if isFilled then Some(TileSet.tileToBounds x y tileSet) else None)
-          |> List.collect (fun bounds -> innerCollide lastTickPhysics physics bounds)
-          |> List.filter (fun resolution -> resolution.EventDistance > 0.f)
-          |> List.sortBy (fun resolution -> resolution.EventDistance)
+          |> List.collect (fun bounds -> innerCollide lastTickPhysics physics bounds
+                                         |> List.map (fun resolution -> (resolution, None)))
 
-        List.tryHead contacts
+        let blockResolutions =
+          blocks
+          |> List.filter (fun block -> block.HitPoints > 0)
+          |> List.collect (fun block -> innerCollide lastTickPhysics physics block.Entity.Physics.Bounds
+                                        |> List.map (fun resolution -> (resolution, Some(block))))
+        
+        let resolutions =
+          List.append tileResolutions blockResolutions
+          |> List.filter (fun (resolution, _) -> resolution.EventDistance > 0.f)
+          |> List.sortBy (fun (resolution, _) -> resolution.EventDistance)
+
+        List.tryHead resolutions
         |> function
-           | None -> (physics, bounceCount)
-           | Some(resolution) -> (resolution.ResolvedPhysics, bounceCount + 1)
+           | None -> (physics, bounceCount, blocks)
+           | Some(resolution, block) -> 
+                let newBounceCount = bounceCount + 1
+                match block with
+                | None -> (resolution.ResolvedPhysics, newBounceCount, blocks)
+                | Some(block) ->
+                    let newBlock = {block with HitPoints = block.HitPoints - 1}
+                    let unhitBlocks = blocks |> List.filter (fun b -> b.Entity.ID <> block.Entity.ID)
+                    let newBlocks = if newBlock.HitPoints <= 0
+                                    then unhitBlocks
+                                    else newBlock :: unhitBlocks
+                    (resolution.ResolvedPhysics, newBounceCount, newBlocks)
 
 type Game1 () as this =
     inherit Game()
@@ -418,14 +445,15 @@ type Game1 () as this =
     let graphics = new GraphicsDeviceManager(this)
     let mutable spriteBatch = Unchecked.defaultof<_>
     let mutable ball = Unchecked.defaultof<Entity>
-    let mutable tileSet = Unchecked.defaultof<TileSet>
-    let mutable tileLayer = Unchecked.defaultof<TileLayer>
+    let mutable wallTileSet = Unchecked.defaultof<TileSet>
+    let mutable wallTileLayer = Unchecked.defaultof<TileLayer>
     let mutable fonts = Unchecked.defaultof<Map<string, SpriteFont>>
     let mutable bounceCount = 0
+    let mutable blocks = Unchecked.defaultof<List<Block>>
 
-    let defaultBallPhysics = { Bounds = BoundingCircle({ Center = Vector2(32.f + 1.6f * 64.f,32.f + 1.f * 64.f); Radius = 32.f })
+    let defaultBallPhysics = { Bounds = BoundingCircle({ Center = Vector2(320.f, 850.f); Radius = 32.f })
                                Speed = 300.f
-                               MovementDirection = Vector2.Normalize(Vector2(1.f, 7.f)) }
+                               MovementDirection = Vector2.Negate Vector2.UnitY }
 
     let (|KeyDown|_|) k (state: KeyboardState) =
         if state.IsKeyDown k then Some() else None
@@ -463,45 +491,81 @@ type Game1 () as this =
         graphics.PreferredBackBufferHeight <- 15 * 64
         graphics.ApplyChanges()
 
+        base.Initialize()
+
+    member this.LoadWallTiles() =
         let blackAndWhiteBlocks = this.Content.Load "BlackAndWhiteBlocks"
-        tileSet <- TileSet.create(2, 2, 64, 64, blackAndWhiteBlocks)
+        let tileSet = TileSet.create(2, 2, 64, 64, blackAndWhiteBlocks)
 
         let layerTiles = 
             [| 2;2;2;2;2;2;2;2;2;2;
                2;0;0;0;0;0;0;0;0;2;
                2;0;0;0;0;0;0;0;0;2;
-               2;0;0;0;0;0;4;0;0;2;
-               2;0;0;0;0;0;0;0;0;2;
-               2;0;0;1;0;0;0;0;0;2;
                2;0;0;0;0;0;0;0;0;2;
                2;0;0;0;0;0;0;0;0;2;
                2;0;0;0;0;0;0;0;0;2;
                2;0;0;0;0;0;0;0;0;2;
-               2;0;0;0;0;0;0;1;0;2;
                2;0;0;0;0;0;0;0;0;2;
-               2;0;0;3;0;0;0;0;0;2;
+               2;0;0;0;0;0;0;0;0;2;
+               2;0;0;0;0;0;0;0;0;2;
+               2;0;0;0;0;0;0;0;0;2;
+               2;0;0;0;0;0;0;0;0;2;
+               2;0;0;0;0;0;0;0;0;2;
                2;0;0;0;0;0;0;0;0;2;
                2;2;2;2;2;2;2;2;2;2 |]
-        tileLayer <- {
+
+        let tileLayer = {
             CountX = 10
             CountY = 15
             Tiles = layerTiles
         }
 
-        base.Initialize()
+        tileSet, tileLayer
+
+    member this.LoadBlocks() =
+        let mutable blockCounter = 0
+        [
+            for x in 0 .. 6 do
+                for y in 0 .. 5 do
+                    blockCounter <- blockCounter + 1
+                    let blockBounds = { Center = Vector2.Zero
+                                        CenterToCorner = Vector2(32.f, 16.f)
+                                        Rotation = 0.f }
+                    let xCoord = 128.f + 2.f * blockBounds.CenterToCorner.X * float32 x
+                    let yCoord = 192.f + 2.f * blockBounds.CenterToCorner.Y * float32 y
+                    yield
+                        { Entity = {
+                              ID = 1000 + blockCounter
+                              Physics = {
+                                  Bounds = BoundingBox({ blockBounds with Center = Vector2(xCoord, yCoord) })
+                                  Speed = 0.f
+                                  MovementDirection = Vector2.UnitY }
+                              Sprite = {
+                                  Texture = this.Content.Load "block"
+                                  Size = Point(64, 32)
+                                  Offset = Point.Zero } }
+                          HitPoints = 1 }
+        ]
 
     override this.LoadContent() =
         spriteBatch <- new SpriteBatch(this.GraphicsDevice)
+
+        let tileSet, tileLayer = this.LoadWallTiles()
+        wallTileSet <- tileSet
+        wallTileLayer <- tileLayer
 
         fonts <- Map([
                     "consolas12", this.Content.Load "Consolas12"
                     ])
 
-        ball <- { Physics = defaultBallPhysics
+        ball <- { ID = 1
+                  Physics = defaultBallPhysics
                   Sprite = {
                       Texture = this.Content.Load "ball"
                       Size = Point(64, 64)
                       Offset = Point.Zero } }
+
+        blocks <- this.LoadBlocks()
  
     override this.Update (gameTime) =
         let keyboardState = Keyboard.GetState()
@@ -514,17 +578,18 @@ type Game1 () as this =
         let movementDirection = getMovementVector(physics.MovementDirection, keyboardState)
 
         let newPosition =
-            let maxX, maxY = float32 (tileLayer.CountX * tileSet.TileSizeX), float32 (tileLayer.CountY * tileSet.TileSizeY)
+            let maxX, maxY = float32 (wallTileLayer.CountX * wallTileSet.TileSizeX), float32 (wallTileLayer.CountY * wallTileSet.TileSizeY)
             let position = physics.Bounds.Center + movementDirection * physics.Speed * float32 gameTime.ElapsedGameTime.TotalSeconds
             Vector2.Clamp(position, Vector2.Zero, Vector2(maxX, maxY))
 
         let proposedPhysics = { physics with
                                         Bounds = physics.Bounds.Repositioned newPosition
                                         MovementDirection = movementDirection }
-        let newPhysics, newBounceCount = Collision.collide tileLayer tileSet physics proposedPhysics bounceCount
+        let newPhysics, newBounceCount, newBlocks = Collision.collide blocks wallTileLayer wallTileSet physics proposedPhysics bounceCount
 
         ball <- { ball with Physics = newPhysics }
         bounceCount <- if resetBall then 0 else newBounceCount
+        blocks <- newBlocks
 
         base.Update(gameTime)
  
@@ -533,7 +598,8 @@ type Game1 () as this =
 
         spriteBatch.Begin()
 
-        TileLayer.draw(spriteBatch, tileSet, tileLayer)
+        TileLayer.draw(spriteBatch, wallTileSet, wallTileLayer)
+        blocks |> List.iter (fun block -> block.Entity.Sprite.Draw(block.Entity.Physics.Bounds.Center, spriteBatch))
         ball.Sprite.Draw(ball.Physics.Bounds.Center, spriteBatch)
 
         let debugInfo = String.Join("\n",
