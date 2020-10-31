@@ -401,7 +401,7 @@ module Collision =
             |> List.choose (Contact.fromShape lastTickPhysics movement)
             |> List.choose (fun contact -> Some(reflect contact))
 
-    let collide (blocks: List<Block>) (tileLayer: TileLayer) (tileSet: TileSet) (lastTickPhysics: Physics) (physics: Physics) (bounceCount: int)=
+    let collide (paddle: Entity) (blocks: List<Block>) (tileLayer: TileLayer) (tileSet: TileSet) (lastTickPhysics: Physics) (physics: Physics) (bounceCount: int)=
 
         let sweep = Vector2 physics.Bounds.Sweep
         let min = Vector2.Min(lastTickPhysics.Bounds.Center, physics.Bounds.Center) - sweep
@@ -418,9 +418,12 @@ module Collision =
           |> List.filter (fun block -> block.HitPoints > 0)
           |> List.collect (fun block -> innerCollide lastTickPhysics physics block.Entity.Physics.Bounds
                                         |> List.map (fun resolution -> (resolution, Some(block))))
-        
+
+        let paddleResolutions = innerCollide lastTickPhysics physics paddle.Physics.Bounds
+                                |> List.map (fun resolution -> (resolution, None))
+
         let resolutions =
-          List.append tileResolutions blockResolutions
+          List.concat [tileResolutions; blockResolutions; paddleResolutions]
           |> List.filter (fun (resolution, _) -> resolution.EventDistance > 0.f)
           |> List.sortBy (fun (resolution, _) -> resolution.EventDistance)
 
@@ -450,10 +453,17 @@ type Game1 () as this =
     let mutable fonts = Unchecked.defaultof<Map<string, SpriteFont>>
     let mutable bounceCount = 0
     let mutable blocks = Unchecked.defaultof<List<Block>>
+    let mutable paddle = Unchecked.defaultof<Entity>
 
     let defaultBallPhysics = { Bounds = BoundingCircle({ Center = Vector2(320.f, 850.f); Radius = 32.f })
                                Speed = 300.f
-                               MovementDirection = Vector2.Negate Vector2.UnitY }
+                               MovementDirection = Vector2(1.f, -500.f) |> Vector2.Normalize }
+
+    let defaultPaddlePhysics = { Bounds = BoundingBox({ Center = Vector2(320.f, 850.f + 32.f + 8.f)
+                                                        CenterToCorner = Vector2(48.f, 8.f)
+                                                        Rotation = 0.f})
+                                 Speed = 400.f
+                                 MovementDirection = Vector2.Zero }
 
     let (|KeyDown|_|) k (state: KeyboardState) =
         if state.IsKeyDown k then Some() else None
@@ -480,7 +490,7 @@ type Game1 () as this =
             let adjustedMotion = initialVector + inputDirection * dampening
             Vector2.Normalize adjustedMotion
         else
-            Vector2.Normalize initialVector
+            initialVector
 
     do
         this.Content.RootDirectory <- "Content"
@@ -565,6 +575,14 @@ type Game1 () as this =
                       Size = Point(64, 64)
                       Offset = Point.Zero } }
 
+        paddle <- { ID = 0
+                    Physics = defaultPaddlePhysics
+                    Sprite = {
+                        Texture = this.Content.Load "paddle"
+                        Size = Point(96, 18)
+                        Offset = Point.Zero
+                     } }
+
         blocks <- this.LoadBlocks()
  
     override this.Update (gameTime) =
@@ -575,17 +593,19 @@ type Game1 () as this =
         let resetBall = keyboardState.IsKeyDown(Keys.R)
         let physics = if resetBall then defaultBallPhysics else ball.Physics
 
-        let movementDirection = getMovementVector(physics.MovementDirection, keyboardState)
+        let paddleMovementDirection = getMovementVector(Vector2.Zero, keyboardState)
+        let newPaddlePosition = paddle.Physics.Bounds.Center + paddleMovementDirection * paddle.Physics.Speed * float32 gameTime.ElapsedGameTime.TotalSeconds
+        // TODO: Collide paddle with ball before moving
+        paddle <- { paddle with Physics = { paddle.Physics with Bounds = paddle.Physics.Bounds.Repositioned(newPaddlePosition) } }
 
         let newPosition =
             let maxX, maxY = float32 (wallTileLayer.CountX * wallTileSet.TileSizeX), float32 (wallTileLayer.CountY * wallTileSet.TileSizeY)
-            let position = physics.Bounds.Center + movementDirection * physics.Speed * float32 gameTime.ElapsedGameTime.TotalSeconds
+            let position = physics.Bounds.Center + physics.MovementDirection * physics.Speed * float32 gameTime.ElapsedGameTime.TotalSeconds
             Vector2.Clamp(position, Vector2.Zero, Vector2(maxX, maxY))
 
         let proposedPhysics = { physics with
-                                        Bounds = physics.Bounds.Repositioned newPosition
-                                        MovementDirection = movementDirection }
-        let newPhysics, newBounceCount, newBlocks = Collision.collide blocks wallTileLayer wallTileSet physics proposedPhysics bounceCount
+                                        Bounds = physics.Bounds.Repositioned newPosition }
+        let newPhysics, newBounceCount, newBlocks = Collision.collide paddle blocks wallTileLayer wallTileSet physics proposedPhysics bounceCount
 
         ball <- { ball with Physics = newPhysics }
         bounceCount <- if resetBall then 0 else newBounceCount
@@ -601,6 +621,7 @@ type Game1 () as this =
         TileLayer.draw(spriteBatch, wallTileSet, wallTileLayer)
         blocks |> List.iter (fun block -> block.Entity.Sprite.Draw(block.Entity.Physics.Bounds.Center, spriteBatch))
         ball.Sprite.Draw(ball.Physics.Bounds.Center, spriteBatch)
+        paddle.Sprite.Draw(paddle.Physics.Bounds.Center, spriteBatch)
 
         let debugInfo = String.Join("\n",
                             [
