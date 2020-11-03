@@ -594,7 +594,11 @@ type Game1 () as this =
         let physics = if resetBall then defaultBallPhysics else ball.Physics
 
         let paddleMovementDirection = getMovementVector(Vector2.Zero, keyboardState)
-        let newPaddlePosition = paddle.Physics.Bounds.Center + paddleMovementDirection * paddle.Physics.Speed * float32 gameTime.ElapsedGameTime.TotalSeconds
+        let newPaddlePosition =
+            let minX, maxX = float32 wallTileSet.TileSizeX + paddle.Physics.Bounds.Sweep, float32 ((wallTileLayer.CountX - 1) * wallTileSet.TileSizeX) - paddle.Physics.Bounds.Sweep
+            let absoluteY = defaultPaddlePhysics.Bounds.Center.Y
+            let position = paddle.Physics.Bounds.Center + paddleMovementDirection * paddle.Physics.Speed * float32 gameTime.ElapsedGameTime.TotalSeconds
+            Vector2.Clamp(position, Vector2(minX, absoluteY), Vector2(maxX, absoluteY))
         // TODO: Collide paddle with ball before moving
         paddle <- { paddle with Physics = { paddle.Physics with Bounds = paddle.Physics.Bounds.Repositioned(newPaddlePosition) } }
 
