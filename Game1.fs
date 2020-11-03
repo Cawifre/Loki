@@ -454,6 +454,7 @@ type Game1 () as this =
     let mutable bounceCount = 0
     let mutable blocks = Unchecked.defaultof<List<Block>>
     let mutable paddle = Unchecked.defaultof<Entity>
+    let mutable debugDisplay = false
 
     let defaultBallPhysics = { Bounds = BoundingCircle({ Center = Vector2(320.f, 850.f); Radius = 32.f })
                                Speed = 300.f
@@ -590,6 +591,8 @@ type Game1 () as this =
         if (GamePad.GetState(PlayerIndex.One).Buttons.Back = ButtonState.Pressed || keyboardState.IsKeyDown(Keys.Escape))
         then this.Exit();
 
+        if keyboardState.IsKeyDown(Keys.I) then debugDisplay <- not debugDisplay
+
         let resetBall = keyboardState.IsKeyDown(Keys.R)
         let physics = if resetBall then defaultBallPhysics else ball.Physics
 
@@ -628,13 +631,14 @@ type Game1 () as this =
         ball.Sprite.Draw(ball.Physics.Bounds.Center, spriteBatch)
         paddle.Sprite.Draw(paddle.Physics.Bounds.Center, spriteBatch)
 
-        let debugInfo = String.Join("\n",
-                            [
-                                sprintf "Ball.X: %f" ball.Physics.Bounds.Center.X
-                                sprintf "Ball.Y: %f" ball.Physics.Bounds.Center.Y
-                                sprintf "Bounces: %i" bounceCount
-                            ])
-        spriteBatch.DrawString(fonts.["consolas12"], debugInfo, Vector2.One, Color.White)
+        if debugDisplay then
+            let debugInfo = String.Join("\n",
+                                [
+                                    sprintf "Ball.X: %f" ball.Physics.Bounds.Center.X
+                                    sprintf "Ball.Y: %f" ball.Physics.Bounds.Center.Y
+                                    sprintf "Bounces: %i" bounceCount
+                                ])
+            spriteBatch.DrawString(fonts.["consolas12"], debugInfo, Vector2.One, Color.White)
 
         let gameStatusMessage =
             if blocks |> List.isEmpty then "You Win!"
