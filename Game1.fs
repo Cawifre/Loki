@@ -522,7 +522,7 @@ type Game1 () as this =
                2;0;0;0;0;0;0;0;0;2;
                2;0;0;0;0;0;0;0;0;2;
                2;0;0;0;0;0;0;0;0;2;
-               2;2;2;2;2;2;2;2;2;2 |]
+               2;0;0;0;0;0;0;0;0;2 |]
 
         let tileLayer = {
             CountX = 10
@@ -584,7 +584,7 @@ type Game1 () as this =
                      } }
 
         blocks <- this.LoadBlocks()
- 
+
     override this.Update (gameTime) =
         let keyboardState = Keyboard.GetState()
         if (GamePad.GetState(PlayerIndex.One).Buttons.Back = ButtonState.Pressed || keyboardState.IsKeyDown(Keys.Escape))
@@ -599,7 +599,7 @@ type Game1 () as this =
         paddle <- { paddle with Physics = { paddle.Physics with Bounds = paddle.Physics.Bounds.Repositioned(newPaddlePosition) } }
 
         let newPosition =
-            let maxX, maxY = float32 (wallTileLayer.CountX * wallTileSet.TileSizeX), float32 (wallTileLayer.CountY * wallTileSet.TileSizeY)
+            let maxX, maxY = float32 (wallTileLayer.CountX * wallTileSet.TileSizeX), float32 ((wallTileLayer.CountY + 2) * wallTileSet.TileSizeY)
             let position = physics.Bounds.Center + physics.MovementDirection * physics.Speed * float32 gameTime.ElapsedGameTime.TotalSeconds
             Vector2.Clamp(position, Vector2.Zero, Vector2(maxX, maxY))
 
@@ -609,7 +609,8 @@ type Game1 () as this =
 
         ball <- { ball with Physics = newPhysics }
         bounceCount <- if resetBall then 0 else newBounceCount
-        blocks <- newBlocks
+        blocks <- if resetBall then this.LoadBlocks() else newBlocks
+        if resetBall then paddle <- { paddle with Physics = defaultPaddlePhysics }
 
         base.Update(gameTime)
  
@@ -630,6 +631,12 @@ type Game1 () as this =
                                 sprintf "Bounces: %i" bounceCount
                             ])
         spriteBatch.DrawString(fonts.["consolas12"], debugInfo, Vector2.One, Color.White)
+
+        let gameStatusMessage =
+            if blocks |> List.isEmpty then "You Win!"
+            else if ball.Physics.Bounds.Center.Y > 1000.f then "You Lose."
+            else sprintf "%i Blocks Remaining" blocks.Length
+        spriteBatch.DrawString(fonts.["consolas12"], gameStatusMessage, Vector2(220.f, 25.f), Color.White)
 
         spriteBatch.End()
 
